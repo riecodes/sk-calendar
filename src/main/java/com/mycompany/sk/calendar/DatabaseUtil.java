@@ -141,7 +141,7 @@ public class DatabaseUtil {
     public static java.util.List<SKProfile> getAllProfiles() {
         java.util.List<SKProfile> profiles = new java.util.ArrayList<>();
         try {
-            String query = "SELECT * FROM sk_profiles ORDER BY id";
+            String query = "SELECT * FROM sk_profiles ORDER BY position_number";
             PreparedStatement stmt = connection.prepareStatement(query);
             ResultSet rs = stmt.executeQuery();
             
@@ -152,6 +152,7 @@ public class DatabaseUtil {
                 profile.setAge(rs.getInt("age"));
                 profile.setSex(rs.getString("sex"));
                 profile.setPosition(rs.getString("position"));
+                profile.setPositionNumber(rs.getInt("position_number"));
                 profile.setCommittee(rs.getString("committee"));
                 profile.setSector(rs.getString("sector"));
                 profile.setPhotoPath(rs.getString("photo_path"));
@@ -173,16 +174,17 @@ public class DatabaseUtil {
      */
     public static int saveProfile(SKProfile profile) {
         try {
-            String query = "INSERT INTO sk_profiles (name, age, sex, position, committee, sector, photo_path) VALUES (?, ?, ?, ?, ?, ?, ?)";
+            String query = "INSERT INTO sk_profiles (name, age, sex, position, position_number, committee, sector, photo_path) VALUES (?, ?, ?, ?, ?, ?, ?, ?)";
             PreparedStatement stmt = connection.prepareStatement(query, Statement.RETURN_GENERATED_KEYS);
             
             stmt.setString(1, profile.getName());
             stmt.setInt(2, profile.getAge());
             stmt.setString(3, profile.getSex());
             stmt.setString(4, profile.getPosition());
-            stmt.setString(5, profile.getCommittee());
-            stmt.setString(6, profile.getSector());
-            stmt.setString(7, profile.getPhotoPath());
+            stmt.setInt(5, profile.getPositionNumber());
+            stmt.setString(6, profile.getCommittee());
+            stmt.setString(7, profile.getSector());
+            stmt.setString(8, profile.getPhotoPath());
             
             int rowsAffected = stmt.executeUpdate();
             
@@ -210,17 +212,18 @@ public class DatabaseUtil {
      */
     public static boolean updateProfile(SKProfile profile) {
         try {
-            String query = "UPDATE sk_profiles SET name=?, age=?, sex=?, position=?, committee=?, sector=?, photo_path=? WHERE id=?";
+            String query = "UPDATE sk_profiles SET name=?, age=?, sex=?, position=?, position_number=?, committee=?, sector=?, photo_path=? WHERE id=?";
             PreparedStatement stmt = connection.prepareStatement(query);
             
             stmt.setString(1, profile.getName());
             stmt.setInt(2, profile.getAge());
             stmt.setString(3, profile.getSex());
             stmt.setString(4, profile.getPosition());
-            stmt.setString(5, profile.getCommittee());
-            stmt.setString(6, profile.getSector());
-            stmt.setString(7, profile.getPhotoPath());
-            stmt.setInt(8, profile.getId());
+            stmt.setInt(5, profile.getPositionNumber());
+            stmt.setString(6, profile.getCommittee());
+            stmt.setString(7, profile.getSector());
+            stmt.setString(8, profile.getPhotoPath());
+            stmt.setInt(9, profile.getId());
             
             int rowsAffected = stmt.executeUpdate();
             stmt.close();
@@ -342,7 +345,6 @@ public class DatabaseUtil {
                 CalendarScreen.Event event = new CalendarScreen.Event();
                 event.setId(rs.getInt("id"));
                 event.setTitle(rs.getString("title"));
-                event.setDescription(rs.getString("description"));
                 
                 // Convert SQL Date to LocalDate
                 java.sql.Date sqlDate = rs.getDate("event_date");
@@ -350,8 +352,16 @@ public class DatabaseUtil {
                     event.setDate(sqlDate.toLocalDate());
                 }
                 
-                event.setTime(rs.getString("event_time"));
+                // Convert time from 24-hour to 12-hour format for display
+                java.sql.Time sqlTime = rs.getTime("event_time");
+                if (sqlTime != null) {
+                    event.setTime(convertTo12HourFormat(sqlTime.toString()));
+                } else {
+                    event.setTime("");
+                }
+                
                 event.setLocation(rs.getString("location"));
+                event.setAttendingOfficialsCount(rs.getInt("attending_officials_count"));
                 event.setCreatedBy(rs.getInt("created_by"));
                 
                 events.add(event);
@@ -367,20 +377,131 @@ public class DatabaseUtil {
     }
     
     /**
+     * Convert 12-hour format time to 24-hour format for database storage
+     * @param time12Hour Time in 12-hour format (e.g., "2:00 PM", "10:30 AM")
+     * @return Time in 24-hour format (e.g., "14:00:00", "10:30:00") or null if invalid
+     */
+    private static String convertTo24HourFormat(String time12Hour) {
+        if (time12Hour == null || time12Hour.trim().isEmpty()) {
+            return null;
+        }
+        
+        try {
+            // Remove extra spaces and convert to uppercase
+            String cleanTime = time12Hour.trim().toUpperCase();
+            
+            // Check if it's already in 24-hour format (no AM/PM)
+            if (!cleanTime.contains("AM") && !cleanTime.contains("PM")) {
+                // If it contains colons and numbers, assume it's already 24-hour format
+                if (cleanTime.matches("^\\d{1,2}:\\d{2}(:\\d{2})?$")) {
+                    // Add seconds if missing
+                    if (!cleanTime.contains(":")) {
+                        return cleanTime + ":00";
+                    }
+                    String[] parts = cleanTime.split(":");
+                    if (parts.length == 2) {
+                        return cleanTime + ":00";
+                    }
+                    return cleanTime;
+                }
+                return null;
+            }
+            
+            // Parse 12-hour format
+            boolean isPM = cleanTime.contains("PM");
+            String timeOnly = cleanTime.replace("AM", "").replace("PM", "").trim();
+            
+            String[] parts = timeOnly.split(":");
+            if (parts.length != 2) {
+                return null;
+            }
+            
+            int hours = Integer.parseInt(parts[0]);
+            int minutes = Integer.parseInt(parts[1]);
+            
+            // Validate time values
+            if (hours < 1 || hours > 12 || minutes < 0 || minutes > 59) {
+                return null;
+            }
+            
+            // Convert to 24-hour format
+            if (isPM && hours != 12) {
+                hours += 12;
+            } else if (!isPM && hours == 12) {
+                hours = 0;
+            }
+            
+            return String.format("%02d:%02d:00", hours, minutes);
+            
+        } catch (NumberFormatException e) {
+            System.err.println("Invalid time format: " + time12Hour);
+            return null;
+        }
+    }
+    
+    /**
+     * Convert 24-hour format time to 12-hour format for display
+     * @param time24Hour Time in 24-hour format (e.g., "14:00:00")
+     * @return Time in 12-hour format (e.g., "2:00 PM") or original string if invalid
+     */
+    private static String convertTo12HourFormat(String time24Hour) {
+        if (time24Hour == null || time24Hour.trim().isEmpty()) {
+            return "";
+        }
+        
+        try {
+            String[] parts = time24Hour.split(":");
+            if (parts.length < 2) {
+                return time24Hour; // Return original if can't parse
+            }
+            
+            int hours = Integer.parseInt(parts[0]);
+            int minutes = Integer.parseInt(parts[1]);
+            
+            // Validate time values
+            if (hours < 0 || hours > 23 || minutes < 0 || minutes > 59) {
+                return time24Hour;
+            }
+            
+            String period = hours >= 12 ? "PM" : "AM";
+            int displayHours = hours;
+            
+            if (hours == 0) {
+                displayHours = 12;
+            } else if (hours > 12) {
+                displayHours = hours - 12;
+            }
+            
+            return String.format("%d:%02d %s", displayHours, minutes, period);
+            
+        } catch (NumberFormatException e) {
+            return time24Hour; // Return original if can't parse
+        }
+    }
+    
+    /**
      * Save a new event to database
      * @param event Event to save
      * @return Generated event ID, or 0 if failed
      */
     public static int saveEvent(CalendarScreen.Event event) {
         try {
-            String query = "INSERT INTO events (title, description, event_date, event_time, location, created_by) VALUES (?, ?, ?, ?, ?, ?)";
+            String query = "INSERT INTO events (title, event_date, event_time, location, attending_officials_count, created_by) VALUES (?, ?, ?, ?, ?, ?)";
             PreparedStatement stmt = connection.prepareStatement(query, Statement.RETURN_GENERATED_KEYS);
             
             stmt.setString(1, event.getTitle());
-            stmt.setString(2, event.getDescription());
-            stmt.setDate(3, java.sql.Date.valueOf(event.getDate()));
-            stmt.setString(4, event.getTime());
-            stmt.setString(5, event.getLocation());
+            stmt.setDate(2, java.sql.Date.valueOf(event.getDate()));
+            
+            // Convert time to 24-hour format for database storage
+            String time24Hour = convertTo24HourFormat(event.getTime());
+            if (time24Hour != null) {
+                stmt.setTime(3, java.sql.Time.valueOf(time24Hour));
+            } else {
+                stmt.setTime(3, null);
+            }
+            
+            stmt.setString(4, event.getLocation());
+            stmt.setInt(5, event.getAttendingOfficialsCount());
             stmt.setInt(6, event.getCreatedBy());
             
             int affectedRows = stmt.executeUpdate();
@@ -410,14 +531,22 @@ public class DatabaseUtil {
      */
     public static boolean updateEvent(CalendarScreen.Event event) {
         try {
-            String query = "UPDATE events SET title = ?, description = ?, event_date = ?, event_time = ?, location = ? WHERE id = ?";
+            String query = "UPDATE events SET title = ?, event_date = ?, event_time = ?, location = ?, attending_officials_count = ? WHERE id = ?";
             PreparedStatement stmt = connection.prepareStatement(query);
             
             stmt.setString(1, event.getTitle());
-            stmt.setString(2, event.getDescription());
-            stmt.setDate(3, java.sql.Date.valueOf(event.getDate()));
-            stmt.setString(4, event.getTime());
-            stmt.setString(5, event.getLocation());
+            stmt.setDate(2, java.sql.Date.valueOf(event.getDate()));
+            
+            // Convert time to 24-hour format for database storage
+            String time24Hour = convertTo24HourFormat(event.getTime());
+            if (time24Hour != null) {
+                stmt.setTime(3, java.sql.Time.valueOf(time24Hour));
+            } else {
+                stmt.setTime(3, null);
+            }
+            
+            stmt.setString(4, event.getLocation());
+            stmt.setInt(5, event.getAttendingOfficialsCount());
             stmt.setInt(6, event.getId());
             
             int affectedRows = stmt.executeUpdate();
@@ -472,10 +601,18 @@ public class DatabaseUtil {
                 CalendarScreen.Event event = new CalendarScreen.Event();
                 event.setId(rs.getInt("id"));
                 event.setTitle(rs.getString("title"));
-                event.setDescription(rs.getString("description"));
                 event.setDate(rs.getDate("event_date").toLocalDate());
-                event.setTime(rs.getString("event_time"));
+                
+                // Convert time from 24-hour to 12-hour format for display
+                java.sql.Time sqlTime = rs.getTime("event_time");
+                if (sqlTime != null) {
+                    event.setTime(convertTo12HourFormat(sqlTime.toString()));
+                } else {
+                    event.setTime("");
+                }
+                
                 event.setLocation(rs.getString("location"));
+                event.setAttendingOfficialsCount(rs.getInt("attending_officials_count"));
                 event.setCreatedBy(rs.getInt("created_by"));
                 
                 events.add(event);
@@ -488,5 +625,280 @@ public class DatabaseUtil {
         }
         
         return events;
+    }
+    
+    // ===========================
+    // EVENT ASSIGNMENT METHODS
+    // ===========================
+    
+    /**
+     * Get SK profiles by position numbers
+     * @param positionNumbers List of position numbers to retrieve
+     * @return List of SKProfile objects
+     */
+    public static List<SKProfile> getProfilesByPositionNumbers(List<Integer> positionNumbers) {
+        List<SKProfile> profiles = new ArrayList<>();
+        
+        if (positionNumbers == null || positionNumbers.isEmpty()) {
+            return profiles;
+        }
+        
+        try {
+            // Create placeholders for IN clause
+            String placeholders = String.join(",", java.util.Collections.nCopies(positionNumbers.size(), "?"));
+            String query = "SELECT * FROM sk_profiles WHERE position_number IN (" + placeholders + ") ORDER BY position_number";
+            
+            PreparedStatement stmt = connection.prepareStatement(query);
+            for (int i = 0; i < positionNumbers.size(); i++) {
+                stmt.setInt(i + 1, positionNumbers.get(i));
+            }
+            
+            ResultSet rs = stmt.executeQuery();
+            
+            while (rs.next()) {
+                SKProfile profile = new SKProfile();
+                profile.setId(rs.getInt("id"));
+                profile.setName(rs.getString("name"));
+                profile.setAge(rs.getInt("age"));
+                profile.setSex(rs.getString("sex"));
+                profile.setPosition(rs.getString("position"));
+                profile.setPositionNumber(rs.getInt("position_number"));
+                profile.setCommittee(rs.getString("committee"));
+                profile.setSector(rs.getString("sector"));
+                profile.setPhotoPath(rs.getString("photo_path"));
+                profiles.add(profile);
+            }
+            
+            stmt.close();
+            
+        } catch (SQLException e) {
+            System.err.println("Error fetching profiles by position numbers: " + e.getMessage());
+        }
+        
+        return profiles;
+    }
+    
+    /**
+     * Assign officials to an event
+     * @param eventId ID of the event
+     * @param profileIds List of SK profile IDs to assign
+     * @return true if successful, false otherwise
+     */
+    public static boolean assignOfficialsToEvent(int eventId, List<Integer> profileIds) {
+        if (profileIds == null || profileIds.isEmpty()) {
+            return true; // No assignments needed
+        }
+        
+        try {
+            // First, remove any existing assignments for this event
+            String deleteQuery = "DELETE FROM event_assignments WHERE event_id = ?";
+            PreparedStatement deleteStmt = connection.prepareStatement(deleteQuery);
+            deleteStmt.setInt(1, eventId);
+            deleteStmt.executeUpdate();
+            deleteStmt.close();
+            
+            // Then add new assignments
+            String insertQuery = "INSERT INTO event_assignments (event_id, sk_profile_id, position_number) VALUES (?, ?, (SELECT position_number FROM sk_profiles WHERE id = ?))";
+            PreparedStatement insertStmt = connection.prepareStatement(insertQuery);
+            
+            for (Integer profileId : profileIds) {
+                insertStmt.setInt(1, eventId);
+                insertStmt.setInt(2, profileId);
+                insertStmt.setInt(3, profileId);
+                insertStmt.addBatch();
+            }
+            
+            int[] results = insertStmt.executeBatch();
+            insertStmt.close();
+            
+            // Check if all assignments were successful
+            for (int result : results) {
+                if (result <= 0) {
+                    return false;
+                }
+            }
+            
+            return true;
+            
+        } catch (SQLException e) {
+            System.err.println("Error assigning officials to event: " + e.getMessage());
+            return false;
+        }
+    }
+    
+    /**
+     * Get assigned officials for an event
+     * @param eventId ID of the event
+     * @return List of assigned SKProfile objects
+     */
+    public static List<SKProfile> getAssignedOfficials(int eventId) {
+        List<SKProfile> assignedOfficials = new ArrayList<>();
+        
+        try {
+            String query = "SELECT sp.* FROM sk_profiles sp " +
+                          "JOIN event_assignments ea ON sp.id = ea.sk_profile_id " +
+                          "WHERE ea.event_id = ? ORDER BY sp.position_number";
+            
+            PreparedStatement stmt = connection.prepareStatement(query);
+            stmt.setInt(1, eventId);
+            
+            ResultSet rs = stmt.executeQuery();
+            
+            while (rs.next()) {
+                SKProfile profile = new SKProfile();
+                profile.setId(rs.getInt("id"));
+                profile.setName(rs.getString("name"));
+                profile.setAge(rs.getInt("age"));
+                profile.setSex(rs.getString("sex"));
+                profile.setPosition(rs.getString("position"));
+                profile.setPositionNumber(rs.getInt("position_number"));
+                profile.setCommittee(rs.getString("committee"));
+                profile.setSector(rs.getString("sector"));
+                profile.setPhotoPath(rs.getString("photo_path"));
+                assignedOfficials.add(profile);
+            }
+            
+            stmt.close();
+            
+        } catch (SQLException e) {
+            System.err.println("Error fetching assigned officials: " + e.getMessage());
+        }
+        
+        return assignedOfficials;
+    }
+    
+    /**
+     * Get assigned officials names for an event (for display purposes)
+     * @param eventId ID of the event
+     * @return List of official names
+     */
+    public static List<String> getAssignedOfficialNames(int eventId) {
+        List<String> officialNames = new ArrayList<>();
+        
+        try {
+            String query = "SELECT sp.name, sp.position FROM sk_profiles sp " +
+                          "JOIN event_assignments ea ON sp.id = ea.sk_profile_id " +
+                          "WHERE ea.event_id = ? ORDER BY sp.position_number";
+            
+            PreparedStatement stmt = connection.prepareStatement(query);
+            stmt.setInt(1, eventId);
+            
+            ResultSet rs = stmt.executeQuery();
+            
+            while (rs.next()) {
+                String name = rs.getString("name");
+                String position = rs.getString("position");
+                officialNames.add(name + " (" + position + ")");
+            }
+            
+            stmt.close();
+            
+        } catch (SQLException e) {
+            System.err.println("Error fetching assigned official names: " + e.getMessage());
+        }
+        
+        return officialNames;
+    }
+    
+    // ===========================
+    // ATTENDANCE TRACKING METHODS
+    // ===========================
+    
+    /**
+     * Record attendance for an event
+     * @param eventId ID of the event
+     * @param profileId ID of the SK profile
+     * @param status Attendance status (present, absent, excused)
+     * @param notes Optional notes
+     * @return true if successful, false otherwise
+     */
+    public static boolean recordAttendance(int eventId, int profileId, String status, String notes) {
+        try {
+            String query = "INSERT INTO event_attendance (event_id, sk_profile_id, attendance_status, attendance_time, notes) " +
+                          "VALUES (?, ?, ?, NOW(), ?) " +
+                          "ON DUPLICATE KEY UPDATE attendance_status = ?, attendance_time = NOW(), notes = ?";
+            
+            PreparedStatement stmt = connection.prepareStatement(query);
+            stmt.setInt(1, eventId);
+            stmt.setInt(2, profileId);
+            stmt.setString(3, status);
+            stmt.setString(4, notes);
+            stmt.setString(5, status);
+            stmt.setString(6, notes);
+            
+            int affectedRows = stmt.executeUpdate();
+            stmt.close();
+            
+            return affectedRows > 0;
+            
+        } catch (SQLException e) {
+            System.err.println("Error recording attendance: " + e.getMessage());
+            return false;
+        }
+    }
+    
+    /**
+     * Get attendance records for an event
+     * @param eventId ID of the event
+     * @return List of attendance records with official details
+     */
+    public static List<AttendanceRecord> getEventAttendance(int eventId) {
+        List<AttendanceRecord> attendanceRecords = new ArrayList<>();
+        
+        try {
+            String query = "SELECT sp.name, sp.position, ea.attendance_status, ea.attendance_time, ea.notes " +
+                          "FROM sk_profiles sp " +
+                          "JOIN event_attendance ea ON sp.id = ea.sk_profile_id " +
+                          "WHERE ea.event_id = ? ORDER BY sp.position_number";
+            
+            PreparedStatement stmt = connection.prepareStatement(query);
+            stmt.setInt(1, eventId);
+            
+            ResultSet rs = stmt.executeQuery();
+            
+            while (rs.next()) {
+                AttendanceRecord record = new AttendanceRecord();
+                record.setOfficialName(rs.getString("name"));
+                record.setPosition(rs.getString("position"));
+                record.setAttendanceStatus(rs.getString("attendance_status"));
+                record.setAttendanceTime(rs.getTimestamp("attendance_time"));
+                record.setNotes(rs.getString("notes"));
+                attendanceRecords.add(record);
+            }
+            
+            stmt.close();
+            
+        } catch (SQLException e) {
+            System.err.println("Error fetching event attendance: " + e.getMessage());
+        }
+        
+        return attendanceRecords;
+    }
+    
+    /**
+     * Simple attendance record class
+     */
+    public static class AttendanceRecord {
+        private String officialName;
+        private String position;
+        private String attendanceStatus;
+        private java.sql.Timestamp attendanceTime;
+        private String notes;
+        
+        // Getters and setters
+        public String getOfficialName() { return officialName; }
+        public void setOfficialName(String officialName) { this.officialName = officialName; }
+        
+        public String getPosition() { return position; }
+        public void setPosition(String position) { this.position = position; }
+        
+        public String getAttendanceStatus() { return attendanceStatus; }
+        public void setAttendanceStatus(String attendanceStatus) { this.attendanceStatus = attendanceStatus; }
+        
+        public java.sql.Timestamp getAttendanceTime() { return attendanceTime; }
+        public void setAttendanceTime(java.sql.Timestamp attendanceTime) { this.attendanceTime = attendanceTime; }
+        
+        public String getNotes() { return notes; }
+        public void setNotes(String notes) { this.notes = notes; }
     }
 } 

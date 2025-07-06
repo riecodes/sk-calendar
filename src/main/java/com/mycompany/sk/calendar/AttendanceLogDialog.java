@@ -5,44 +5,53 @@ import java.awt.*;
 import java.awt.event.ActionEvent;
 import java.awt.event.ActionListener;
 import java.util.List;
+import java.util.ArrayList;
 import java.util.HashMap;
 import java.util.Map;
 
 /**
- * Attendance Log Dialog matching the 7.png mockup design
- * Allows tracking attendance for SK officials at specific events
+ * Enhanced Attendance Log Dialog matching the 7.png mockup design
+ * Following CalendarScreen design patterns
  */
 public class AttendanceLogDialog extends JDialog {
     
     private CalendarScreen.Event event;
-    private JLabel eventLabel;
+    private JTextField eventField;
+    private JPanel attendancePanel;
     private JButton saveButton;
-    private JButton deleteButton;
-    private JButton updateButton;
     private JButton backButton;
     
-    // Attendance tracking
-    private Map<String, ButtonGroup> attendanceGroups;
-    private Map<String, JRadioButton> presentButtons;
-    private Map<String, JRadioButton> absentButtons;
-    private Map<String, JRadioButton> excuseButtons;
+    // Store attendance data
+    private Map<Integer, String> attendanceData; // profileId -> status
+    private List<SKProfile> assignedOfficials;
     
-    // SK Officials (from profiles)
-    private String[] skMembers = {
-        "Juan Dela Cruz",
-        "Maria Santos",
-        "Pedro Rodriguez"
-    };
+    public AttendanceLogDialog(Frame parent, CalendarScreen.Event event) {
+        super(parent, "Attendance Log", true);
+        this.event = event;
+        this.attendanceData = new HashMap<>();
+        
+        initializeComponents();
+        setupLayout();
+        loadAttendanceData();
+        setupEventHandlers();
+        
+        setSize(900, 700);
+        setLocationRelativeTo(parent);
+        setResizable(false);
+        setDefaultCloseOperation(JDialog.DISPOSE_ON_CLOSE);
+    }
     
     public AttendanceLogDialog(Dialog parent, CalendarScreen.Event event) {
         super(parent, "Attendance Log", true);
         this.event = event;
+        this.attendanceData = new HashMap<>();
         
         initializeComponents();
         setupLayout();
+        loadAttendanceData();
         setupEventHandlers();
         
-        setSize(900, 600);
+        setSize(900, 700);
         setLocationRelativeTo(parent);
         setResizable(false);
         setDefaultCloseOperation(JDialog.DISPOSE_ON_CLOSE);
@@ -51,30 +60,14 @@ public class AttendanceLogDialog extends JDialog {
     private void initializeComponents() {
         getContentPane().setBackground(new Color(240, 240, 240));
         
-        // Initialize attendance tracking maps
-        attendanceGroups = new HashMap<>();
-        presentButtons = new HashMap<>();
-        absentButtons = new HashMap<>();
-        excuseButtons = new HashMap<>();
+        // Create event field (non-editable, showing event name)
+        eventField = createStyledTextField();
+        eventField.setText(event.getTitle());
+        eventField.setEditable(false);
+        eventField.setForeground(new Color(120, 120, 120)); // Grayed out
         
-        // Create event label
-        eventLabel = new JLabel();
-        eventLabel.setFont(FontUtil.getCanvaSansFont(Font.PLAIN, 18));
-        eventLabel.setForeground(new Color(33, 37, 41));
-        eventLabel.setPreferredSize(new Dimension(500, 50));
-        eventLabel.setOpaque(true);
-        eventLabel.setBackground(new Color(200, 200, 200));
-        eventLabel.setBorder(BorderFactory.createEmptyBorder(10, 15, 10, 15));
-        
-        // Set event text
-        if (event != null) {
-            eventLabel.setText(event.getTitle());
-        }
-        
-        // Create buttons
+        // Create buttons matching CalendarScreen style
         saveButton = createStyledButton("SAVE", new Color(40, 167, 69));
-        deleteButton = createStyledButton("DELETE", new Color(220, 53, 69));
-        updateButton = createStyledButton("UPDATE", new Color(255, 193, 7));
         backButton = createStyledButton("BACK", new Color(108, 117, 125));
     }
     
@@ -85,7 +78,7 @@ public class AttendanceLogDialog extends JDialog {
         JPanel headerPanel = createHeaderPanel();
         add(headerPanel, BorderLayout.NORTH);
         
-        // Main form panel
+        // Main content panel
         JPanel mainPanel = createMainPanel();
         add(mainPanel, BorderLayout.CENTER);
         
@@ -122,130 +115,183 @@ public class AttendanceLogDialog extends JDialog {
         // EVENT field
         gbc.gridx = 0; gbc.gridy = 0;
         gbc.weightx = 0.0;
-        JLabel eventTitleLabel = createStyledLabel("EVENT:");
-        mainPanel.add(eventTitleLabel, gbc);
+        JLabel eventLabel = createStyledLabel("EVENT:");
+        mainPanel.add(eventLabel, gbc);
         
         gbc.gridx = 1; gbc.weightx = 1.0;
         gbc.fill = GridBagConstraints.HORIZONTAL;
         gbc.insets = new Insets(15, 20, 15, 0);
-        mainPanel.add(eventLabel, gbc);
+        mainPanel.add(eventField, gbc);
         
-        // Attendance table header
+        // Attendance table
         gbc.gridx = 0; gbc.gridy = 1;
         gbc.gridwidth = 2;
         gbc.weightx = 1.0;
-        gbc.fill = GridBagConstraints.HORIZONTAL;
-        gbc.insets = new Insets(30, 0, 10, 0);
-        JPanel headerRowPanel = createAttendanceHeader();
-        mainPanel.add(headerRowPanel, gbc);
+        gbc.weighty = 1.0;
+        gbc.fill = GridBagConstraints.BOTH;
+        gbc.insets = new Insets(20, 0, 20, 0);
         
-        // Attendance rows for each member
-        for (int i = 0; i < skMembers.length; i++) {
-            gbc.gridx = 0; gbc.gridy = 2 + i;
-            gbc.gridwidth = 2;
-            gbc.weightx = 1.0;
-            gbc.fill = GridBagConstraints.HORIZONTAL;
-            gbc.insets = new Insets(5, 0, 5, 0);
-            JPanel memberRow = createAttendanceRow(skMembers[i]);
-            mainPanel.add(memberRow, gbc);
-        }
+        attendancePanel = createAttendancePanel();
+        JScrollPane scrollPane = new JScrollPane(attendancePanel);
+        scrollPane.setBorder(BorderFactory.createLineBorder(new Color(200, 200, 200), 1));
+        scrollPane.setVerticalScrollBarPolicy(JScrollPane.VERTICAL_SCROLLBAR_AS_NEEDED);
+        scrollPane.setHorizontalScrollBarPolicy(JScrollPane.HORIZONTAL_SCROLLBAR_NEVER);
+        mainPanel.add(scrollPane, gbc);
         
         return mainPanel;
     }
     
-    private JPanel createAttendanceHeader() {
-        JPanel headerPanel = new JPanel(new GridBagLayout());
-        headerPanel.setBackground(new Color(240, 240, 240));
+    private JPanel createAttendancePanel() {
+        JPanel panel = new JPanel();
+        panel.setLayout(new BoxLayout(panel, BoxLayout.Y_AXIS));
+        panel.setBackground(Color.WHITE);
+        panel.setBorder(BorderFactory.createEmptyBorder(20, 20, 20, 20));
         
-        GridBagConstraints gbc = new GridBagConstraints();
-        gbc.insets = new Insets(5, 10, 5, 10);
-        gbc.anchor = GridBagConstraints.CENTER;
+        // Header row
+        JPanel headerRow = createHeaderRow();
+        panel.add(headerRow);
+        panel.add(Box.createVerticalStrut(10));
         
-        // NAME column
-        gbc.gridx = 0; gbc.weightx = 0.4;
-        JLabel nameHeader = new JLabel("NAME");
-        nameHeader.setFont(FontUtil.getAzoSansFont(Font.BOLD, 18));
-        nameHeader.setForeground(new Color(33, 37, 41));
-        headerPanel.add(nameHeader, gbc);
-        
-        // PRESENT column
-        gbc.gridx = 1; gbc.weightx = 0.2;
-        JLabel presentHeader = new JLabel("PRESENT");
-        presentHeader.setFont(FontUtil.getAzoSansFont(Font.BOLD, 18));
-        presentHeader.setForeground(new Color(33, 37, 41));
-        headerPanel.add(presentHeader, gbc);
-        
-        // ABSENT column
-        gbc.gridx = 2; gbc.weightx = 0.2;
-        JLabel absentHeader = new JLabel("ABSENT");
-        absentHeader.setFont(FontUtil.getAzoSansFont(Font.BOLD, 18));
-        absentHeader.setForeground(new Color(33, 37, 41));
-        headerPanel.add(absentHeader, gbc);
-        
-        // EXCUSE column
-        gbc.gridx = 3; gbc.weightx = 0.2;
-        JLabel excuseHeader = new JLabel("EXCUSE");
-        excuseHeader.setFont(FontUtil.getAzoSansFont(Font.BOLD, 18));
-        excuseHeader.setForeground(new Color(33, 37, 41));
-        headerPanel.add(excuseHeader, gbc);
-        
-        return headerPanel;
+        return panel;
     }
     
-    private JPanel createAttendanceRow(String memberName) {
-        JPanel rowPanel = new JPanel(new GridBagLayout());
-        rowPanel.setBackground(new Color(240, 240, 240));
+    private JPanel createHeaderRow() {
+        JPanel headerRow = new JPanel(new GridLayout(1, 5, 10, 0));
+        headerRow.setBackground(new Color(25, 57, 94));
+        headerRow.setBorder(BorderFactory.createEmptyBorder(15, 20, 15, 20));
         
-        GridBagConstraints gbc = new GridBagConstraints();
-        gbc.insets = new Insets(5, 10, 5, 10);
-        gbc.anchor = GridBagConstraints.CENTER;
+        String[] headers = {"NAME", "POSITION", "PRESENT", "ABSENT", "EXCUSE"};
+        for (String header : headers) {
+            JLabel headerLabel = new JLabel(header);
+            headerLabel.setFont(FontUtil.getAzoSansFont(Font.BOLD, 18));
+            headerLabel.setForeground(Color.WHITE);
+            headerLabel.setHorizontalAlignment(JLabel.CENTER);
+            headerRow.add(headerLabel);
+        }
         
-        // NAME field
-        gbc.gridx = 0; gbc.weightx = 0.4;
-        JLabel nameField = new JLabel();
-        nameField.setFont(FontUtil.getCanvaSansFont(Font.PLAIN, 16));
-        nameField.setForeground(new Color(33, 37, 41));
-        nameField.setPreferredSize(new Dimension(200, 40));
-        nameField.setOpaque(true);
-        nameField.setBackground(new Color(200, 200, 200));
-        nameField.setBorder(BorderFactory.createEmptyBorder(5, 10, 5, 10));
-        nameField.setText(memberName);
-        rowPanel.add(nameField, gbc);
+        return headerRow;
+    }
+    
+    private JPanel createOfficialRow(SKProfile official, String currentStatus) {
+        JPanel row = new JPanel(new GridLayout(1, 5, 10, 0));
+        row.setBackground(Color.WHITE);
+        row.setBorder(BorderFactory.createCompoundBorder(
+            BorderFactory.createMatteBorder(0, 0, 1, 0, new Color(200, 200, 200)),
+            BorderFactory.createEmptyBorder(15, 20, 15, 20)
+        ));
         
-        // Create button group for this member
+        // Name label
+        JLabel nameLabel = new JLabel(official.getName());
+        nameLabel.setFont(FontUtil.getCanvaSansFont(Font.PLAIN, 16));
+        nameLabel.setForeground(new Color(33, 37, 41));
+        nameLabel.setHorizontalAlignment(JLabel.LEFT);
+        row.add(nameLabel);
+        
+        // Position label
+        JLabel positionLabel = new JLabel(official.getPosition());
+        positionLabel.setFont(FontUtil.getCanvaSansFont(Font.PLAIN, 16));
+        positionLabel.setForeground(new Color(108, 117, 125));
+        positionLabel.setHorizontalAlignment(JLabel.LEFT);
+        row.add(positionLabel);
+        
+        // Radio buttons for attendance status
         ButtonGroup attendanceGroup = new ButtonGroup();
-        attendanceGroups.put(memberName, attendanceGroup);
         
-        // PRESENT radio button
-        gbc.gridx = 1; gbc.weightx = 0.2;
-        JRadioButton presentButton = createStyledRadioButton();
-        presentButtons.put(memberName, presentButton);
+        JRadioButton presentButton = createStyledRadioButton("Present");
+        JRadioButton absentButton = createStyledRadioButton("Absent");
+        JRadioButton excuseButton = createStyledRadioButton("Excuse");
+        
         attendanceGroup.add(presentButton);
-        rowPanel.add(presentButton, gbc);
-        
-        // ABSENT radio button
-        gbc.gridx = 2; gbc.weightx = 0.2;
-        JRadioButton absentButton = createStyledRadioButton();
-        absentButtons.put(memberName, absentButton);
         attendanceGroup.add(absentButton);
-        rowPanel.add(absentButton, gbc);
-        
-        // EXCUSE radio button
-        gbc.gridx = 3; gbc.weightx = 0.2;
-        JRadioButton excuseButton = createStyledRadioButton();
-        excuseButtons.put(memberName, excuseButton);
         attendanceGroup.add(excuseButton);
-        rowPanel.add(excuseButton, gbc);
         
-        return rowPanel;
+        // Set current status
+        switch (currentStatus.toLowerCase()) {
+            case "present":
+                presentButton.setSelected(true);
+                break;
+            case "absent":
+                absentButton.setSelected(true);
+                break;
+            case "excused":
+                excuseButton.setSelected(true);
+                break;
+            default:
+                presentButton.setSelected(true); // Default to present
+                break;
+        }
+        
+        // Add action listeners to update attendance data
+        presentButton.addActionListener(e -> {
+            if (presentButton.isSelected()) {
+                attendanceData.put(official.getId(), "present");
+            }
+        });
+        
+        absentButton.addActionListener(e -> {
+            if (absentButton.isSelected()) {
+                attendanceData.put(official.getId(), "absent");
+            }
+        });
+        
+        excuseButton.addActionListener(e -> {
+            if (excuseButton.isSelected()) {
+                attendanceData.put(official.getId(), "excused");
+            }
+        });
+        
+        // Add radio button panels
+        row.add(createRadioButtonPanel(presentButton));
+        row.add(createRadioButtonPanel(absentButton));
+        row.add(createRadioButtonPanel(excuseButton));
+        
+        return row;
     }
     
-    private JRadioButton createStyledRadioButton() {
+    private JPanel createRadioButtonPanel(JRadioButton radioButton) {
+        JPanel panel = new JPanel(new FlowLayout(FlowLayout.CENTER, 0, 0));
+        panel.setBackground(Color.WHITE);
+        panel.add(radioButton);
+        return panel;
+    }
+    
+    private JRadioButton createStyledRadioButton(String text) {
         JRadioButton radioButton = new JRadioButton();
-        radioButton.setBackground(new Color(240, 240, 240));
-        radioButton.setPreferredSize(new Dimension(30, 30));
+        radioButton.setBackground(Color.WHITE);
         radioButton.setFocusPainted(false);
         radioButton.setCursor(new Cursor(Cursor.HAND_CURSOR));
+        radioButton.setPreferredSize(new Dimension(20, 20));
+        
+        // Custom styling for radio button
+        radioButton.setUI(new javax.swing.plaf.basic.BasicRadioButtonUI() {
+            @Override
+            public void paint(Graphics g, JComponent c) {
+                Graphics2D g2 = (Graphics2D) g.create();
+                g2.setRenderingHint(RenderingHints.KEY_ANTIALIASING, RenderingHints.VALUE_ANTIALIAS_ON);
+                
+                AbstractButton button = (AbstractButton) c;
+                int size = 16;
+                int x = (c.getWidth() - size) / 2;
+                int y = (c.getHeight() - size) / 2;
+                
+                // Draw circle background
+                g2.setColor(Color.WHITE);
+                g2.fillOval(x, y, size, size);
+                
+                // Draw border
+                g2.setColor(new Color(108, 117, 125));
+                g2.drawOval(x, y, size, size);
+                
+                // Draw filled circle if selected
+                if (button.isSelected()) {
+                    g2.setColor(new Color(0, 123, 255));
+                    g2.fillOval(x + 3, y + 3, size - 6, size - 6);
+                }
+                
+                g2.dispose();
+            }
+        });
+        
         return radioButton;
     }
     
@@ -256,11 +302,34 @@ public class AttendanceLogDialog extends JDialog {
         buttonPanel.setLayout(new FlowLayout(FlowLayout.LEFT, 20, 0));
         
         buttonPanel.add(saveButton);
-        buttonPanel.add(deleteButton);
-        buttonPanel.add(updateButton);
         buttonPanel.add(backButton);
         
         return buttonPanel;
+    }
+    
+    private JTextField createStyledTextField() {
+        JTextField field = new JTextField() {
+            @Override
+            protected void paintComponent(Graphics g) {
+                Graphics2D g2 = (Graphics2D) g.create();
+                g2.setRenderingHint(RenderingHints.KEY_ANTIALIASING, RenderingHints.VALUE_ANTIALIAS_ON);
+                
+                // Draw background
+                g2.setColor(new Color(200, 200, 200));
+                g2.fillRoundRect(0, 0, getWidth(), getHeight(), 8, 8);
+                
+                super.paintComponent(g);
+                g2.dispose();
+            }
+        };
+        
+        field.setPreferredSize(new Dimension(500, 50));
+        field.setFont(FontUtil.getCanvaSansFont(Font.PLAIN, 18));
+        field.setForeground(new Color(33, 37, 41));
+        field.setBorder(BorderFactory.createEmptyBorder(10, 15, 10, 15));
+        field.setOpaque(false);
+        
+        return field;
     }
     
     private JLabel createStyledLabel(String text) {
@@ -287,7 +356,7 @@ public class AttendanceLogDialog extends JDialog {
             }
         };
         
-        button.setPreferredSize(new Dimension(180, 50));
+        button.setPreferredSize(new Dimension(120, 50));
         button.setFont(FontUtil.getAzoSansFont(Font.BOLD, 16));
         button.setForeground(Color.WHITE);
         button.setBorder(BorderFactory.createEmptyBorder());
@@ -299,61 +368,90 @@ public class AttendanceLogDialog extends JDialog {
         return button;
     }
     
+    private void loadAttendanceData() {
+        // Get assigned officials for this event
+        assignedOfficials = DatabaseUtil.getAssignedOfficials(event.getId());
+        
+        if (assignedOfficials.isEmpty()) {
+            JLabel noOfficialsLabel = new JLabel("No officials assigned to this event.");
+            noOfficialsLabel.setFont(FontUtil.getCanvaSansFont(Font.ITALIC, 16));
+            noOfficialsLabel.setForeground(new Color(108, 117, 125));
+            noOfficialsLabel.setHorizontalAlignment(JLabel.CENTER);
+            noOfficialsLabel.setBorder(BorderFactory.createEmptyBorder(40, 20, 40, 20));
+            
+            attendancePanel.removeAll();
+            attendancePanel.add(noOfficialsLabel);
+            attendancePanel.revalidate();
+            attendancePanel.repaint();
+            return;
+        }
+        
+        // Load existing attendance records
+        List<DatabaseUtil.AttendanceRecord> existingRecords = DatabaseUtil.getEventAttendance(event.getId());
+        Map<Integer, String> existingAttendance = new HashMap<>();
+        for (DatabaseUtil.AttendanceRecord record : existingRecords) {
+            // Find profile by name (this is a limitation - ideally we'd have profile ID in attendance record)
+            for (SKProfile profile : assignedOfficials) {
+                if (profile.getName().equals(record.getOfficialName())) {
+                    existingAttendance.put(profile.getId(), record.getAttendanceStatus());
+                    attendanceData.put(profile.getId(), record.getAttendanceStatus());
+                    break;
+                }
+            }
+        }
+        
+        // Clear and rebuild attendance panel
+        attendancePanel.removeAll();
+        
+        // Add header
+        attendancePanel.add(createHeaderRow());
+        attendancePanel.add(Box.createVerticalStrut(5));
+        
+        // Add official rows
+        for (SKProfile official : assignedOfficials) {
+            String currentStatus = existingAttendance.getOrDefault(official.getId(), "present");
+            JPanel officialRow = createOfficialRow(official, currentStatus);
+            attendancePanel.add(officialRow);
+        }
+        
+        attendancePanel.revalidate();
+        attendancePanel.repaint();
+    }
+    
     private void setupEventHandlers() {
         saveButton.addActionListener(e -> saveAttendance());
-        updateButton.addActionListener(e -> updateAttendance());
-        deleteButton.addActionListener(e -> deleteAttendance());
         backButton.addActionListener(e -> dispose());
     }
     
     private void saveAttendance() {
-        Map<String, String> attendanceData = collectAttendanceData();
-        
-        // Save attendance data to database
-        // For now, just show success message
-        StringBuilder summary = new StringBuilder("Attendance saved:\n");
-        for (Map.Entry<String, String> entry : attendanceData.entrySet()) {
-            summary.append(entry.getKey()).append(": ").append(entry.getValue()).append("\n");
+        if (attendanceData.isEmpty()) {
+            JOptionPane.showMessageDialog(this,
+                "No attendance data to save.", 
+                "No Data", 
+                JOptionPane.WARNING_MESSAGE);
+            return;
         }
         
-        JOptionPane.showMessageDialog(this, summary.toString(), "Success", JOptionPane.INFORMATION_MESSAGE);
-    }
-    
-    private void updateAttendance() {
-        Map<String, String> attendanceData = collectAttendanceData();
-        
-        // Update attendance data in database
-        JOptionPane.showMessageDialog(this, "Attendance updated successfully!", "Success", JOptionPane.INFORMATION_MESSAGE);
-    }
-    
-    private void deleteAttendance() {
-        int result = JOptionPane.showConfirmDialog(this, 
-            "Are you sure you want to delete this attendance record?", 
-            "Confirm Delete", 
-            JOptionPane.YES_NO_OPTION);
-        
-        if (result == JOptionPane.YES_OPTION) {
-            // Delete attendance record from database
-            JOptionPane.showMessageDialog(this, "Attendance record deleted successfully!", "Success", JOptionPane.INFORMATION_MESSAGE);
-            dispose();
-        }
-    }
-    
-    private Map<String, String> collectAttendanceData() {
-        Map<String, String> attendanceData = new HashMap<>();
-        
-        for (String member : skMembers) {
-            String status = "Not Set";
-            if (presentButtons.get(member).isSelected()) {
-                status = "Present";
-            } else if (absentButtons.get(member).isSelected()) {
-                status = "Absent";
-            } else if (excuseButtons.get(member).isSelected()) {
-                status = "Excuse";
+        boolean success = true;
+        for (Map.Entry<Integer, String> entry : attendanceData.entrySet()) {
+            int profileId = entry.getKey();
+            String status = entry.getValue();
+            
+            if (!DatabaseUtil.recordAttendance(event.getId(), profileId, status, "")) {
+                success = false;
             }
-            attendanceData.put(member, status);
         }
-        
-        return attendanceData;
+                
+                if (success) {
+            JOptionPane.showMessageDialog(this, 
+                "Attendance saved successfully!", 
+                "Success", 
+                JOptionPane.INFORMATION_MESSAGE);
+                } else {
+                    JOptionPane.showMessageDialog(this,
+                "Error saving attendance data.", 
+                        "Error",
+                        JOptionPane.ERROR_MESSAGE);
+        }
     }
 } 

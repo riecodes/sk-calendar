@@ -146,7 +146,7 @@ public class CalendarScreen extends JFrame {
                 g2.setRenderingHint(RenderingHints.KEY_ANTIALIASING, RenderingHints.VALUE_ANTIALIAS_ON);
                 
                 // Draw background
-                g2.setColor(new Color(220, 53, 69)); // Red background
+                
                 g2.fillRoundRect(0, 0, getWidth(), getHeight(), 15, 15);
                 
                 super.paintComponent(g);
@@ -310,12 +310,20 @@ public class CalendarScreen extends JFrame {
         JPanel eventsPanel = createEventsPanel();
         agendaSection.add(eventsPanel, BorderLayout.CENTER);
         
-        // Add event button
+        // Action buttons
         addEventButton = createAddEventButton();
-        JPanel buttonPanel = new JPanel(new FlowLayout(FlowLayout.CENTER));
+        JButton editEventButton = createActionButton("EDIT EVENT", new Color(255, 193, 7));
+        JButton attendanceLogButton = createActionButton("ATTENDANCE LOG", new Color(0, 123, 255));
+        
+        editEventButton.addActionListener(e -> openEditEventDialog());
+        attendanceLogButton.addActionListener(e -> openAttendanceLogDialog());
+        
+        JPanel buttonPanel = new JPanel(new FlowLayout(FlowLayout.CENTER, 10, 0));
         buttonPanel.setBackground(new Color(192, 192, 192));
         buttonPanel.setBorder(BorderFactory.createEmptyBorder(20, 0, 0, 0));
         buttonPanel.add(addEventButton);
+        buttonPanel.add(editEventButton);
+        buttonPanel.add(attendanceLogButton);
         agendaSection.add(buttonPanel, BorderLayout.SOUTH);
         
         return agendaSection;
@@ -343,6 +351,17 @@ public class CalendarScreen extends JFrame {
         eventsTextArea.setBorder(BorderFactory.createEmptyBorder(10, 0, 0, 0));
         eventsTextArea.setLineWrap(true);
         eventsTextArea.setWrapStyleWord(true);
+        eventsTextArea.setCursor(new Cursor(Cursor.HAND_CURSOR));
+        
+        // Add mouse listener for event editing
+        eventsTextArea.addMouseListener(new MouseAdapter() {
+            @Override
+            public void mouseClicked(MouseEvent e) {
+                if (e.getClickCount() == 2) {
+                    openEditEventDialog();
+                }
+            }
+        });
         
         JScrollPane scrollPane = new JScrollPane(eventsTextArea);
         scrollPane.setBorder(BorderFactory.createEmptyBorder());
@@ -355,23 +374,27 @@ public class CalendarScreen extends JFrame {
     }
     
     private JButton createAddEventButton() {
-        JButton button = new JButton("ADD EVENT") {
+        return createActionButton("ADD EVENT", new Color(25, 57, 94));
+    }
+    
+    private JButton createActionButton(String text, Color backgroundColor) {
+        JButton button = new JButton(text) {
             @Override
             protected void paintComponent(Graphics g) {
                 Graphics2D g2 = (Graphics2D) g.create();
                 g2.setRenderingHint(RenderingHints.KEY_ANTIALIASING, RenderingHints.VALUE_ANTIALIAS_ON);
                 
                 // Draw rounded background
-                g2.setColor(new Color(25, 57, 94));
-                g2.fillRoundRect(0, 0, getWidth(), getHeight(), 25, 25);
+                g2.setColor(backgroundColor);
+                g2.fillRoundRect(0, 0, getWidth(), getHeight(), 15, 15);
                 
                 super.paintComponent(g);
                 g2.dispose();
             }
         };
         
-        button.setPreferredSize(new Dimension(200, 50));
-        button.setFont(FontUtil.getAzoSansFont(Font.BOLD, 18));
+        button.setPreferredSize(new Dimension(140, 45));
+        button.setFont(FontUtil.getAzoSansFont(Font.BOLD, 12));
         button.setForeground(Color.WHITE);
         button.setBorder(BorderFactory.createEmptyBorder());
         button.setFocusPainted(false);
@@ -507,20 +530,8 @@ public class CalendarScreen extends JFrame {
                           .append(selectedDate.format(DateTimeFormatter.ofPattern("MMMM d, yyyy")))
                           .append(".");
             } else {
-                agendaText.append("Events for ")
-                          .append(selectedDate.format(DateTimeFormatter.ofPattern("MMMM d, yyyy")))
-                          .append(":\n\n");
-                
                 for (Event event : dayEvents) {
-                    agendaText.append("• ").append(event.getTitle());
-                    if (event.getTime() != null && !event.getTime().isEmpty()) {
-                        agendaText.append(" (").append(event.getTime()).append(")");
-                    }
-                    agendaText.append("\n");
-                    if (event.getDescription() != null && !event.getDescription().isEmpty()) {
-                        agendaText.append("  ").append(event.getDescription()).append("\n");
-                    }
-                    agendaText.append("\n");
+                    agendaText.append("\u2022 ").append(event.getTitle()).append("\n");
                 }
             }
         }
@@ -544,26 +555,139 @@ public class CalendarScreen extends JFrame {
         updateAgenda();
     }
     
+    private void openEditEventDialog() {
+        if (selectedDate == null) {
+            return;
+        }
+        
+        // Get events for the selected date
+        List<Event> dayEvents = events.stream()
+            .filter(event -> event.getDate().equals(selectedDate))
+            .toList();
+        
+        if (dayEvents.isEmpty()) {
+            JOptionPane.showMessageDialog(this, 
+                "No events found for the selected date.", 
+                "No Events", 
+                JOptionPane.INFORMATION_MESSAGE);
+            return;
+        }
+        
+        Event eventToEdit;
+        if (dayEvents.size() == 1) {
+            // Only one event, edit it directly
+            eventToEdit = dayEvents.get(0);
+        } else {
+            // Multiple events, let user choose
+            String[] eventTitles = dayEvents.stream()
+                .map(Event::getTitle)
+                .toArray(String[]::new);
+            
+            String selectedTitle = (String) JOptionPane.showInputDialog(
+                this,
+                "Select an event to edit:",
+                "Select Event",
+                JOptionPane.QUESTION_MESSAGE,
+                null,
+                eventTitles,
+                eventTitles[0]
+            );
+            
+            if (selectedTitle == null) {
+                return; // User cancelled
+            }
+            
+            eventToEdit = dayEvents.stream()
+                .filter(event -> event.getTitle().equals(selectedTitle))
+                .findFirst()
+                .orElse(null);
+        }
+        
+        if (eventToEdit != null) {
+            AddEventDialog dialog = new AddEventDialog(this, selectedDate, eventToEdit);
+            dialog.setVisible(true);
+            
+            // Refresh events after dialog closes
+            loadEvents();
+            updateCalendar();
+            updateAgenda();
+        }
+    }
+    
+    private void openAttendanceLogDialog() {
+        if (selectedDate == null) {
+            return;
+        }
+        
+        // Get events for the selected date
+        List<Event> dayEvents = events.stream()
+            .filter(event -> event.getDate().equals(selectedDate))
+            .toList();
+        
+        if (dayEvents.isEmpty()) {
+            JOptionPane.showMessageDialog(this, 
+                "No events found for the selected date.", 
+                "No Events", 
+                JOptionPane.INFORMATION_MESSAGE);
+            return;
+        }
+        
+        Event selectedEvent;
+        if (dayEvents.size() == 1) {
+            // Only one event, show attendance for it directly
+            selectedEvent = dayEvents.get(0);
+        } else {
+            // Multiple events, let user choose
+            String[] eventTitles = dayEvents.stream()
+                .map(Event::getTitle)
+                .toArray(String[]::new);
+            
+            String selectedTitle = (String) JOptionPane.showInputDialog(
+                this,
+                "Select an event to view attendance:",
+                "Select Event",
+                JOptionPane.QUESTION_MESSAGE,
+                null,
+                eventTitles,
+                eventTitles[0]
+            );
+            
+            if (selectedTitle == null) {
+                return; // User cancelled
+            }
+            
+            selectedEvent = dayEvents.stream()
+                .filter(event -> event.getTitle().equals(selectedTitle))
+                .findFirst()
+                .orElse(null);
+        }
+        
+        if (selectedEvent != null) {
+            AttendanceLogDialog dialog = new AttendanceLogDialog(this, selectedEvent);
+            dialog.setVisible(true);
+        }
+    }
+    
     /**
      * Simple Event class for calendar events
      */
     public static class Event {
         private int id;
         private String title;
-        private String description;
         private LocalDate date;
         private String time;
         private String location;
+        private int attendingOfficialsCount;
         private int createdBy;
         
         public Event() {}
         
-        public Event(String title, String description, LocalDate date, String time, String location) {
+        public Event(String title, LocalDate date, String time, String location) {
             this.title = title;
-            this.description = description;
             this.date = date;
             this.time = time;
             this.location = location;
+            this.attendingOfficialsCount = 1; // Default to 1
         }
         
         // Getters and setters
@@ -573,9 +697,6 @@ public class CalendarScreen extends JFrame {
         public String getTitle() { return title; }
         public void setTitle(String title) { this.title = title; }
         
-        public String getDescription() { return description; }
-        public void setDescription(String description) { this.description = description; }
-        
         public LocalDate getDate() { return date; }
         public void setDate(LocalDate date) { this.date = date; }
         
@@ -584,6 +705,9 @@ public class CalendarScreen extends JFrame {
         
         public String getLocation() { return location; }
         public void setLocation(String location) { this.location = location; }
+        
+        public int getAttendingOfficialsCount() { return attendingOfficialsCount; }
+        public void setAttendingOfficialsCount(int attendingOfficialsCount) { this.attendingOfficialsCount = attendingOfficialsCount; }
         
         public int getCreatedBy() { return createdBy; }
         public void setCreatedBy(int createdBy) { this.createdBy = createdBy; }

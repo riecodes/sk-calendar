@@ -13,8 +13,9 @@ import java.util.List;
 public class DutyAssignmentDialog extends JDialog {
     
     private CalendarScreen.Event event;
-    private JComboBox<String> official1Dropdown;
-    private JComboBox<String> official2Dropdown;
+    private int numberOfOfficials;
+    private boolean isEditMode;
+    private JComboBox<String>[] officialDropdowns;
     private JButton saveButton;
     private JButton deleteButton;
     private JButton updateButton;
@@ -31,36 +32,63 @@ public class DutyAssignmentDialog extends JDialog {
         "SK Kagawad 5",
         "SK Kagawad 6",
         "SK Kagawad 7",
-        "SK Secretary",
-        "SK Treasurer"
+        "Secretary",
+        "Treasurer"
     };
     
-    public DutyAssignmentDialog(Dialog parent, CalendarScreen.Event event) {
+    public DutyAssignmentDialog(Dialog parent, CalendarScreen.Event event, int numberOfOfficials, boolean isEditMode) {
         super(parent, "Duty Assignment", true);
         this.event = event;
+        this.numberOfOfficials = Math.max(1, Math.min(10, numberOfOfficials)); // Ensure between 1-10
+        this.isEditMode = isEditMode;
         
         initializeComponents();
         setupLayout();
         setupEventHandlers();
         
-        setSize(900, 500);
+        // Set a reasonable maximum height and enable scrolling for large numbers of officials
+        int baseHeight = 350;
+        int contentHeight = numberOfOfficials * 80;
+        int maxHeight = 700; // Maximum dialog height
+        
+        int dialogHeight = Math.min(baseHeight + contentHeight, maxHeight);
+        setSize(900, dialogHeight);
         setLocationRelativeTo(parent);
         setResizable(false);
         setDefaultCloseOperation(JDialog.DISPOSE_ON_CLOSE);
     }
     
+    @SuppressWarnings("unchecked")
     private void initializeComponents() {
         getContentPane().setBackground(new Color(240, 240, 240));
         
-        // Create dropdowns
-        official1Dropdown = createStyledComboBox();
-        official2Dropdown = createStyledComboBox();
+        // Create dynamic dropdowns array
+        officialDropdowns = new JComboBox[numberOfOfficials];
+        for (int i = 0; i < numberOfOfficials; i++) {
+            officialDropdowns[i] = createStyledComboBox();
+        }
         
         // Create buttons
         saveButton = createStyledButton("SAVE", new Color(40, 167, 69));
         deleteButton = createStyledButton("DELETE", new Color(220, 53, 69));
         updateButton = createStyledButton("UPDATE", new Color(255, 193, 7));
         backButton = createStyledButton("BACK", new Color(108, 117, 125));
+        
+        // Show/hide buttons based on mode
+        if (isEditMode) {
+            // Edit mode: show UPDATE, DELETE, and BACK
+            saveButton.setVisible(false);
+            deleteButton.setVisible(true);
+            updateButton.setVisible(true);
+            
+            // Load existing assignments
+            loadExistingAssignments();
+        } else {
+            // New assignment mode: show SAVE and BACK only
+            saveButton.setVisible(true);
+            deleteButton.setVisible(false);
+            updateButton.setVisible(false);
+        }
     }
     
     private void setupLayout() {
@@ -70,9 +98,16 @@ public class DutyAssignmentDialog extends JDialog {
         JPanel headerPanel = createHeaderPanel();
         add(headerPanel, BorderLayout.NORTH);
         
-        // Main form panel
+        // Main form panel with scrolling
         JPanel mainPanel = createMainPanel();
-        add(mainPanel, BorderLayout.CENTER);
+        JScrollPane scrollPane = new JScrollPane(mainPanel);
+        scrollPane.setVerticalScrollBarPolicy(JScrollPane.VERTICAL_SCROLLBAR_AS_NEEDED);
+        scrollPane.setHorizontalScrollBarPolicy(JScrollPane.HORIZONTAL_SCROLLBAR_NEVER);
+        scrollPane.setBorder(BorderFactory.createEmptyBorder());
+        scrollPane.getVerticalScrollBar().setUnitIncrement(16);
+        scrollPane.getViewport().setBackground(new Color(240, 240, 240));
+        scrollPane.setBackground(new Color(240, 240, 240));
+        add(scrollPane, BorderLayout.CENTER);
         
         // Button panel
         JPanel buttonPanel = createButtonPanel();
@@ -100,6 +135,10 @@ public class DutyAssignmentDialog extends JDialog {
         mainPanel.setBorder(BorderFactory.createEmptyBorder(20, 40, 20, 40));
         mainPanel.setLayout(new GridBagLayout());
         
+        // Set preferred size to accommodate all officials (for proper scrolling)
+        int contentHeight = 120 + (numberOfOfficials * 80) + 40; // Comment + officials + padding
+        mainPanel.setPreferredSize(new Dimension(820, contentHeight));
+        
         GridBagConstraints gbc = new GridBagConstraints();
         gbc.insets = new Insets(15, 0, 15, 0);
         gbc.anchor = GridBagConstraints.WEST;
@@ -107,35 +146,29 @@ public class DutyAssignmentDialog extends JDialog {
         // Comment text
         gbc.gridx = 0; gbc.gridy = 0;
         gbc.gridwidth = 2;
-        JLabel commentLabel = new JLabel("//Depends on no. of attendees");
+        JLabel commentLabel = new JLabel("//Assign " + numberOfOfficials + " official(s) to this event");
         commentLabel.setFont(FontUtil.getCanvaSansFont(Font.ITALIC, 16));
         commentLabel.setForeground(new Color(108, 117, 125));
         mainPanel.add(commentLabel, gbc);
         
-        // OFFICIAL NO.1 dropdown
-        gbc.gridx = 0; gbc.gridy = 1;
-        gbc.gridwidth = 1;
-        gbc.weightx = 0.0;
-        JLabel official1Label = createStyledLabel("OFFICIAL NO.1:");
-        mainPanel.add(official1Label, gbc);
-        
-        gbc.gridx = 1; gbc.weightx = 1.0;
-        gbc.fill = GridBagConstraints.HORIZONTAL;
-        gbc.insets = new Insets(15, 20, 15, 0);
-        mainPanel.add(official1Dropdown, gbc);
-        
-        // OFFICIAL NO.2 dropdown
-        gbc.gridx = 0; gbc.gridy = 2;
-        gbc.weightx = 0.0;
-        gbc.fill = GridBagConstraints.NONE;
-        gbc.insets = new Insets(15, 0, 15, 0);
-        JLabel official2Label = createStyledLabel("OFFICIAL NO.2:");
-        mainPanel.add(official2Label, gbc);
-        
-        gbc.gridx = 1; gbc.weightx = 1.0;
-        gbc.fill = GridBagConstraints.HORIZONTAL;
-        gbc.insets = new Insets(15, 20, 15, 0);
-        mainPanel.add(official2Dropdown, gbc);
+        // Dynamically add official dropdowns
+        for (int i = 0; i < numberOfOfficials; i++) {
+            // Official label
+            gbc.gridx = 0; gbc.gridy = i + 1;
+            gbc.gridwidth = 1;
+            gbc.weightx = 0.0;
+            gbc.fill = GridBagConstraints.NONE;
+            gbc.insets = new Insets(15, 0, 15, 0);
+            
+            JLabel officialLabel = createStyledLabel("OFFICIAL NO." + (i + 1) + ":");
+            mainPanel.add(officialLabel, gbc);
+            
+            // Official dropdown
+            gbc.gridx = 1; gbc.weightx = 1.0;
+            gbc.fill = GridBagConstraints.HORIZONTAL;
+            gbc.insets = new Insets(15, 20, 15, 0);
+            mainPanel.add(officialDropdowns[i], gbc);
+        }
         
         return mainPanel;
     }
@@ -226,18 +259,54 @@ public class DutyAssignmentDialog extends JDialog {
         });
     }
     
+    private void loadExistingAssignments() {
+        // Load existing assignments for this event
+        List<SKProfile> assignedOfficials = DatabaseUtil.getAssignedOfficials(event.getId());
+        
+        // Populate dropdowns with existing assignments
+        for (int i = 0; i < Math.min(assignedOfficials.size(), officialDropdowns.length); i++) {
+            SKProfile profile = assignedOfficials.get(i);
+            String officialTitle = profile.getPosition();
+            
+            // Find and select the matching item in the dropdown
+            for (int j = 0; j < skOfficials.length; j++) {
+                if (skOfficials[j].equals(officialTitle)) {
+                    officialDropdowns[i].setSelectedIndex(j);
+                    break;
+                }
+            }
+        }
+    }
+    
     private void saveAssignment() {
         if (validateSelection()) {
-            // Save duty assignment to database
-            // For now, just show success message
-            JOptionPane.showMessageDialog(this, "Duty assignment saved successfully!", "Success", JOptionPane.INFORMATION_MESSAGE);
+            // Get selected officials and save to database
+            List<Integer> selectedProfileIds = getSelectedProfileIds();
+            
+            if (!selectedProfileIds.isEmpty()) {
+                boolean success = DatabaseUtil.assignOfficialsToEvent(event.getId(), selectedProfileIds);
+                if (success) {
+                    JOptionPane.showMessageDialog(this, "Duty assignment saved successfully!", "Success", JOptionPane.INFORMATION_MESSAGE);
+                    dispose();
+                } else {
+                    JOptionPane.showMessageDialog(this, "Error saving duty assignment.", "Error", JOptionPane.ERROR_MESSAGE);
+                }
+            }
         }
     }
     
     private void updateAssignment() {
         if (validateSelection()) {
-            // Update duty assignment in database
-            JOptionPane.showMessageDialog(this, "Duty assignment updated successfully!", "Success", JOptionPane.INFORMATION_MESSAGE);
+            // Update duty assignment in database (same as save - replace existing)
+            List<Integer> selectedProfileIds = getSelectedProfileIds();
+            
+            boolean success = DatabaseUtil.assignOfficialsToEvent(event.getId(), selectedProfileIds);
+            if (success) {
+                JOptionPane.showMessageDialog(this, "Duty assignment updated successfully!", "Success", JOptionPane.INFORMATION_MESSAGE);
+                dispose();
+            } else {
+                JOptionPane.showMessageDialog(this, "Error updating duty assignment.", "Error", JOptionPane.ERROR_MESSAGE);
+            }
         }
     }
     
@@ -248,10 +317,36 @@ public class DutyAssignmentDialog extends JDialog {
             JOptionPane.YES_NO_OPTION);
         
         if (result == JOptionPane.YES_OPTION) {
-            // Delete duty assignment from database
-            JOptionPane.showMessageDialog(this, "Duty assignment deleted successfully!", "Success", JOptionPane.INFORMATION_MESSAGE);
-            dispose();
+            // Delete duty assignment from database (assign empty list)
+            boolean success = DatabaseUtil.assignOfficialsToEvent(event.getId(), new java.util.ArrayList<>());
+            if (success) {
+                JOptionPane.showMessageDialog(this, "Duty assignment deleted successfully!", "Success", JOptionPane.INFORMATION_MESSAGE);
+                dispose();
+            } else {
+                JOptionPane.showMessageDialog(this, "Error deleting duty assignment.", "Error", JOptionPane.ERROR_MESSAGE);
+            }
         }
+    }
+    
+    private List<Integer> getSelectedProfileIds() {
+        List<Integer> profileIds = new java.util.ArrayList<>();
+        
+        for (JComboBox<String> dropdown : officialDropdowns) {
+            if (dropdown.getSelectedIndex() > 0) {
+                String selectedPosition = (String) dropdown.getSelectedItem();
+                
+                // Find the profile ID for this position
+                List<SKProfile> allProfiles = DatabaseUtil.getAllProfiles();
+                for (SKProfile profile : allProfiles) {
+                    if (profile.getPosition().equals(selectedPosition)) {
+                        profileIds.add(profile.getId());
+                        break;
+                    }
+                }
+            }
+        }
+        
+        return profileIds;
     }
     
     private void openAttendanceLogDialog() {
@@ -261,16 +356,38 @@ public class DutyAssignmentDialog extends JDialog {
     }
     
     private boolean validateSelection() {
-        if (official1Dropdown.getSelectedIndex() == 0 && official2Dropdown.getSelectedIndex() == 0) {
+        // Check if at least one official is selected
+        boolean hasSelection = false;
+        for (JComboBox<String> dropdown : officialDropdowns) {
+            if (dropdown.getSelectedIndex() > 0) {
+                hasSelection = true;
+                break;
+            }
+        }
+        
+        if (!hasSelection) {
             JOptionPane.showMessageDialog(this, "Please select at least one official.", "Validation Error", JOptionPane.WARNING_MESSAGE);
             return false;
         }
         
-        // Check if same official is selected for both positions
-        if (official1Dropdown.getSelectedIndex() > 0 && official2Dropdown.getSelectedIndex() > 0) {
-            if (official1Dropdown.getSelectedItem().equals(official2Dropdown.getSelectedItem())) {
-                JOptionPane.showMessageDialog(this, "Cannot assign the same official to both positions.", "Validation Error", JOptionPane.WARNING_MESSAGE);
-                return false;
+        // Check for duplicate selections
+        for (int i = 0; i < officialDropdowns.length; i++) {
+            if (officialDropdowns[i].getSelectedIndex() > 0) {
+                String selectedOfficial = (String) officialDropdowns[i].getSelectedItem();
+                
+                // Check against all other dropdowns
+                for (int j = i + 1; j < officialDropdowns.length; j++) {
+                    if (officialDropdowns[j].getSelectedIndex() > 0) {
+                        String otherOfficial = (String) officialDropdowns[j].getSelectedItem();
+                        if (selectedOfficial.equals(otherOfficial)) {
+                            JOptionPane.showMessageDialog(this, 
+                                "Cannot assign the same official (" + selectedOfficial + ") to multiple positions.", 
+                                "Validation Error", 
+                                JOptionPane.WARNING_MESSAGE);
+                            return false;
+                        }
+                    }
+                }
             }
         }
         
